@@ -5,17 +5,42 @@ const api = axios.create({
   timeout: 10000
 })
 
-// 获取笔记列表（分页、筛选、搜索）
 export function getNotes(params) {
   return api.get('/notes', { params })
 }
 
-// 获取笔记详情
 export function getNoteById(id) {
   return api.get(`/notes/${id}`)
 }
 
-// 获取分类列表
 export function getCategories() {
   return api.get('/categories')
+}
+
+export function createNote(data) {
+  return api.post('/notes', data)
+}
+
+export function updateNote(id, data) {
+  return api.put(`/notes/${id}`, data)
+}
+
+export function deleteNote(id) {
+  return api.delete(`/notes/${id}`)
+}
+
+export function verifyPassword(password) {
+  return api.post('/verify', { password })
+}
+
+export function updatePassword(password) {
+  return api.put('/password', { password })
+}
+
+export function getKeywords() {
+  return api.get('/keywords')
+}
+
+export function createKeyword(keyword) {
+  return api.post('/keywords', { keyword })
 }
