@@ -29,6 +29,10 @@ export function deleteNote(id) {
   return api.delete(`/notes/${id}`)
 }
 
+export function getRecentUpdates(params = {}) {
+  return api.get('/notes/recent-updates', { params })
+}
+
 export function verifyPassword(password) {
   return api.post('/verify', { password })
 }

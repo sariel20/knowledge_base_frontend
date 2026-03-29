@@ -74,6 +74,10 @@
               <el-icon><Search /></el-icon>
               搜索
             </el-button>
+            <el-radio-group v-model="viewMode" size="small" style="margin-left: 10px">
+              <el-radio-button label="grid"><el-icon><Grid /></el-icon>Grid</el-radio-button>
+              <el-radio-button label="list"><el-icon><List /></el-icon>List</el-radio-button>
+            </el-radio-group>
           </div>
         </div>
       </header>
@@ -86,9 +90,30 @@
             <span v-if="selectedCategory">当前分类：{{ selectedCategory }}</span>
           </div>
 
+          <!-- 最近更新时间线 -->
+          <el-card v-if="recentUpdates.length" class="recent-updates-card" shadow="hover">
+            <template #header>
+              <div class="recent-updates-header">最近更新时间线</div>
+            </template>
+            <el-timeline>
+              <el-timeline-item
+                v-for="item in recentUpdates"
+                :key="item.id"
+                :timestamp="item.updatedAt"
+                placement="top"
+              >
+                <div class="timeline-item" @click="showDetail(item)">
+                  <el-tag size="small" type="primary">{{ item.category }}</el-tag>
+                  <span class="timeline-title">{{ item.title }}</span>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+          </el-card>
+
           <!-- 笔记列表 - 无限滚动 -->
           <div 
-            class="notes-grid" 
+            class="notes-container" 
+            :class="viewMode === 'grid' ? 'notes-grid' : 'notes-list'"
             v-loading="loading"
             v-infinite-scroll="loadMoreNotes"
             :infinite-scroll-disabled="!hasMore || isLoadingMore"
@@ -103,7 +128,12 @@
               <template #header>
                 <div class="card-header">
                   <el-tag size="small" type="primary">{{ note.category }}</el-tag>
-                  <span class="note-title">{{ note.title }}</span>
+                  <span class="note-title">
+                    <template v-for="(seg, idx) in getHighlightedSegments(note.title)" :key="idx">
+                      <mark v-if="seg.match" class="highlight">{{ seg.text }}</mark>
+                      <span v-else>{{ seg.text }}</span>
+                    </template>
+                  </span>
                   <div class="card-actions">
                     <el-button size="small" type="primary" @click="editNote(note)">
                       <el-icon><Edit /></el-icon>
@@ -115,7 +145,12 @@
                 </div>
               </template>
               <div class="note-content" @click="showDetail(note)">
-                {{ truncateContent(note.content) }}
+                <template v-if="note.summary">
+                  <template v-for="(seg, idx) in getHighlightedSegments(note.summary)" :key="idx">
+                    <mark v-if="seg.match" class="highlight">{{ seg.text }}</mark>
+                    <span v-else>{{ seg.text }}</span>
+                  </template>
+                </template>
               </div>
               <div class="note-tags" v-if="note.tags">
                 <el-tag 
@@ -130,7 +165,7 @@
               </div>
               <div class="note-footer">
                 <span class="source">{{ note.source }}</span>
-                <span class="date">{{ note.createdAt }}</span>
+                <span class="date">{{ note.updatedAt || note.createdAt }}</span>
               </div>
             </el-card>
           </div>
@@ -150,14 +185,16 @@
         <div class="detail-content" v-if="currentNote">
           <div class="detail-header">
             <el-tag>{{ currentNote.category }}</el-tag>
-            <span class="detail-date">{{ currentNote.createdAt }}</span>
+            <span class="detail-date">创建: {{ currentNote.createdAt }}</span>
+            <span class="detail-date" v-if="currentNote.updatedAt && currentNote.updatedAt !== currentNote.createdAt"> | 修改: {{ currentNote.updatedAt }}</span>
           </div>
           <div class="detail-tags" v-if="currentNote.tags">
             <el-tag v-for="tag in parseTags(currentNote.tags)" :key="tag" type="info">
               {{ tag }}
             </el-tag>
           </div>
-          <div class="detail-body">{{ currentNote.content }}</div>
+          <div v-if="detailLoading" class="detail-body">加载中...</div>
+          <div v-else class="detail-body">{{ currentNote.content }}</div>
         </div>
       </el-dialog>
 
@@ -200,7 +237,7 @@
         </el-form>
         <template #footer>
           <el-button @click="editDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="saveNote">保存</el-button>
+          <el-button type="primary" @click="saveNote" :disabled="editLoading">保存</el-button>
         </template>
       </el-dialog>
 
@@ -231,8 +268,8 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { getNotes, getCategories, getNoteById, createNote, updateNote, deleteNote as delNote, getKeywords } from './api/index'
-import { Search, Plus, Lock, Edit, Delete } from '@element-plus/icons-vue'
+import { getNotes, getCategories, getNoteById, createNote, updateNote, deleteNote as delNote, getKeywords, getRecentUpdates } from './api/index'
+import { Search, Plus, Lock, Edit, Delete, Grid, List } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
@@ -247,19 +284,24 @@ const keywordList = ref([])  // 关键字列表
 const loading = ref(false)
 const total = ref(0)
 
+const recentUpdates = ref([])
+
 const currentPage = ref(1)
 const pageSize = ref(20)
 const selectedCategory = ref('')
 const keyword = ref('')
 const isLoadingMore = ref(false)  // 是否正在加载更多
 const hasMore = ref(true)  // 是否还有更多数据
+const viewMode = ref('grid')  // 列表显示模式：grid 或 list
 
 const detailVisible = ref(false)
 const currentNote = ref(null)
+const detailLoading = ref(false)
 
 const editDialogVisible = ref(false)
 const isEditing = ref(false)
 const editForm = ref({ id: null, category: '', title: '', content: '', tags: [] })
+const editLoading = ref(false)
 
 const deleteVisible = ref(false)
 const deleteTarget = ref(null)
@@ -294,6 +336,7 @@ const handleLogin = async () => {
       localStorage.setItem('loggedIn', 'true')
       fetchCategories()
       fetchNotes()
+      fetchRecentUpdates()
     } else {
       ElMessage.error('密码错误')
     }
@@ -336,6 +379,15 @@ const fetchKeywords = async () => {
   }
 }
 
+const fetchRecentUpdates = async () => {
+  try {
+    const res = await getRecentUpdates({ limit: 10 })
+    recentUpdates.value = res.data?.content || []
+  } catch (e) {
+    console.error('获取最近更新失败', e)
+  }
+}
+
 const fetchNotes = async (append = false) => {
   if (append) {
     if (isLoadingMore.value || !hasMore.value) return
@@ -354,10 +406,13 @@ const fetchNotes = async (append = false) => {
       keyword: keyword.value || null
     }
     const res = await getNotes(params)
-    const newNotes = res.data.content || []
+    let newNotes = res.data.content || []
     
     if (append) {
-      notes.value = [...notes.value, ...newNotes]
+      // 加载更多时去重：根据 id 过滤已存在的笔记
+      const existingIds = new Set(notes.value.map(n => n.id))
+      const uniqueNewNotes = newNotes.filter(n => !existingIds.has(n.id))
+      notes.value = [...notes.value, ...uniqueNewNotes]
     } else {
       notes.value = newNotes
     }
@@ -394,25 +449,47 @@ const handleSearch = () => {
   }, 300)
 }
 
-const showDetail = (note) => {
+const showDetail = async (note) => {
   currentNote.value = note
   detailVisible.value = true
+  detailLoading.value = true
+  try {
+    const res = await getNoteById(note.id)
+    currentNote.value = res.data
+  } catch (e) {
+    ElMessage.error('获取详情失败')
+  } finally {
+    detailLoading.value = false
+  }
 }
 
-const editNote = (note) => {
+const editNote = async (note) => {
   isEditing.value = true
-  // 将字符串标签转换为数组
-  const tagsArray = note.tags 
-    ? note.tags.split(',').map(t => t.trim()).filter(t => t)
-    : []
-  editForm.value = { 
-    id: note.id, 
-    category: note.category, 
-    title: note.title, 
-    content: note.content, 
-    tags: tagsArray
-  }
   editDialogVisible.value = true
+  editLoading.value = true
+  // 先清空，避免编辑弹窗在加载期间展示旧内容
+  editForm.value = { id: null, category: '', title: '', content: '', tags: [] }
+  try {
+    const res = await getNoteById(note.id)
+    const data = res.data
+
+    // 将字符串标签转换为数组
+    const tagsArray = data.tags
+      ? data.tags.split(',').map(t => t.trim()).filter(t => t)
+      : []
+
+    editForm.value = {
+      id: data.id,
+      category: data.category,
+      title: data.title,
+      content: data.content,
+      tags: tagsArray
+    }
+  } catch (e) {
+    ElMessage.error('获取编辑内容失败')
+  } finally {
+    editLoading.value = false
+  }
 }
 
 const confirmDelete = (note) => {
@@ -431,6 +508,7 @@ const saveNote = async () => {
     ElMessage.warning('请填写完整信息')
     return
   }
+  if (editLoading.value) return
   
   // 将数组转换为逗号分隔的字符串
   const tagsStr = Array.isArray(editForm.value.tags) 
@@ -453,6 +531,7 @@ const saveNote = async () => {
     editDialogVisible.value = false
     fetchKeywords()  // 刷新关键字列表
     fetchNotes()
+    fetchRecentUpdates()
   } catch (e) {
     ElMessage.error('保存失败')
   }
@@ -464,14 +543,50 @@ const deleteNote = async () => {
     ElMessage.success('删除成功')
     deleteVisible.value = false
     fetchNotes()
+    fetchRecentUpdates()
   } catch (e) {
     ElMessage.error('删除失败')
   }
 }
 
-const truncateContent = (content) => {
-  if (!content) return ''
-  return content.length > 150 ? content.substring(0, 150) + '...' : content
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const tokenizeQuery = (q) => {
+  const text = q?.trim()
+  if (!text) return []
+  // 支持中文/英文的空格、逗号、分号等分隔
+  return text
+    .split(/[\s,，;；:：]+/)
+    .map(t => t.trim())
+    .filter(Boolean)
+}
+
+const getHighlightedSegments = (text) => {
+  if (text === undefined || text === null) return []
+
+  const tokens = Array.from(new Set(tokenizeQuery(keyword.value)))
+  if (tokens.length === 0) return [{ text, match: false }]
+
+  const escaped = tokens.map(escapeRegExp).sort((a, b) => b.length - a.length)
+  const regex = new RegExp(`(${escaped.join('|')})`, 'gi')
+
+  const segments = []
+  let lastIndex = 0
+  let match
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, match.index), match: false })
+    }
+    segments.push({ text: match[0], match: true })
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex), match: false })
+  }
+
+  return segments.length ? segments : [{ text, match: false }]
 }
 
 const parseTags = (tags) => {
@@ -537,6 +652,7 @@ onMounted(() => {
     fetchCategories()
     fetchKeywords()
     fetchNotes()
+    fetchRecentUpdates()
   }
 })
 </script>
@@ -583,6 +699,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .tag-item { margin: 0; }
 .note-footer { display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
 
+/* List 视图样式 */
+.notes-list { display: flex; flex-direction: column; gap: 12px; }
+.notes-list .note-card { width: 100%; }
+.notes-list .card-header { justify-content: flex-start; }
+.notes-list .note-content { min-height: auto; }
+
+.notes-container { min-height: 200px; }
+
 /* 分页 */
 .pagination { display: flex; justify-content: center; padding: 20px 0; }
 
@@ -596,6 +720,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .detail-date { color: #999; font-size: 14px; }
 .detail-tags { display: flex; gap: 8px; margin-bottom: 15px; }
 .detail-body { line-height: 1.8; color: #333; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow-y: auto; padding: 15px; background: #f9f9f9; border-radius: 8px; }
+
+.highlight { background: rgba(250, 204, 21, 0.35); padding: 0 2px; border-radius: 3px; }
+
+.recent-updates-card { margin-bottom: 20px; }
+.recent-updates-header { font-weight: 600; }
+.timeline-item { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.timeline-title { color: #333; font-weight: 600; }
 
 /* 响应式 */
 @media (max-width: 768px) {
