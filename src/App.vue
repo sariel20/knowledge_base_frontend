@@ -310,8 +310,8 @@ const showPasswordDialog = ref(false)
 const newPassword = ref('')
 const showAddDialog = ref(false)
 
-// API
-const api = axios.create({ baseURL: 'http://localhost:8080/api' })
+// API（走同源 /api，避免手机端仍然请求自身的 localhost）
+const api = axios.create({ baseURL: '/api' })
 
 const verifyPassword = async (pwd) => {
   const res = await api.post('/verify', { password: pwd })

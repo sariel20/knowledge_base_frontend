@@ -1,7 +1,8 @@
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  // 通过 Vite proxy 走同源 /api，便于局域网访问且避免 CORS
+  baseURL: '/api',
   timeout: 10000
 })
 
