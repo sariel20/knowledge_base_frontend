@@ -196,6 +196,13 @@
           <div v-if="detailLoading" class="detail-body">加载中...</div>
           <div v-else class="detail-body">{{ currentNote.content }}</div>
         </div>
+        <template #footer>
+          <el-button @click="detailVisible = false">关闭</el-button>
+          <el-button type="primary" :disabled="detailLoading || !currentNote?.id" @click="editFromDetail">
+            <el-icon><Edit /></el-icon>
+            编辑
+          </el-button>
+        </template>
       </el-dialog>
 
       <!-- 编辑/新增弹窗 -->
@@ -461,6 +468,13 @@ const showDetail = async (note) => {
   } finally {
     detailLoading.value = false
   }
+}
+
+const editFromDetail = () => {
+  const note = currentNote.value
+  if (!note?.id || detailLoading.value) return
+  detailVisible.value = false
+  editNote(note)
 }
 
 const editNote = async (note) => {
